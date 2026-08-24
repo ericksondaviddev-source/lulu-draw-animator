@@ -366,21 +366,20 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
     if (!ctx) return;
     ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
     if (prevFrame) {
-      // Draw previous frame with blue tint at 30% opacity
+      // Draw previous frame at 40% opacity — no CSS filter for Android compat
       ctx.save();
-      ctx.globalAlpha = 0.3;
-      ctx.filter = 'saturate(0.4) brightness(0.85)';
+      ctx.globalAlpha = 0.4;
       renderFrame(ctx, prevFrame, LOGICAL_W, LOGICAL_H);
       ctx.restore();
 
-      // Add a subtle blue overlay to distinguish from current frame
+      // Blue tint overlay to distinguish from current frame
       ctx.save();
-      ctx.globalAlpha = 0.08;
+      ctx.globalAlpha = 0.1;
       ctx.fillStyle = '#6366f1';
       ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
       ctx.restore();
     }
-  }, [prevFrame]);
+  }, [prevFrame, frames]);
 
   // Render main canvas
   useEffect(() => {

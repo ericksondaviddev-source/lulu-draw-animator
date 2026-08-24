@@ -1,33 +1,7 @@
 import type { Frame, AudioClip } from '../types/studio';
 import { renderFrame } from './render';
 
-let ffmpegLoaded = false;
-let ffmpegRef: any = null;
-
-async function loadFFmpeg(onProgress?: (p: number) => void) {
-  if (ffmpegLoaded && ffmpegRef) return ffmpegRef;
-
-  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
-  const { toBlobURL } = await import('@ffmpeg/util');
-
-  const ffmpeg = new FFmpeg();
-
-  ffmpeg.on('progress', ({ progress }: { progress: number }) => {
-    onProgress?.(Math.round(progress * 100));
-  });
-
-  const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-  await ffmpeg.load({
-    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-  });
-
-  ffmpegLoaded = true;
-  ffmpegRef = ffmpeg;
-  return ffmpeg;
-}
-
-export async function exportToMp4(
+export async function exportVideo(
   frames: Frame[],
   clips: AudioClip[],
   canvasSize: { width: number; height: number },
@@ -36,8 +10,7 @@ export async function exportToMp4(
   const w = canvasSize.width;
   const h = canvasSize.height;
 
-  // Step 1: Record frames as WebM using MediaRecorder
-  onProgress?.('Grabando frames...', 0);
+  onProgress?.('Preparando...', 0);
 
   const exportCanvas = document.createElement('canvas');
   exportCanvas.width = w;
@@ -46,7 +19,7 @@ export async function exportToMp4(
 
   const stream = exportCanvas.captureStream(30);
 
-  // Audio
+  // Audio context for mixed output
   let audioCtx: AudioContext | null = null;
   let audioDest: MediaStreamAudioDestinationNode | null = null;
   const audioTracks: MediaStreamTrack[] = [];
@@ -64,7 +37,7 @@ export async function exportToMp4(
         src.buffer = audioBuf;
         src.connect(audioDest);
         src.start(audioCtx.currentTime + clip.startMs / 1000);
-      } catch { /* skip */ }
+      } catch { /* skip broken clip */ }
     }
 
     const { playSfxRecipe } = await import('./audioSynth');
@@ -76,82 +49,68 @@ export async function exportToMp4(
   }
 
   const combined = new MediaStream([...stream.getVideoTracks(), ...audioTracks]);
-  const recorder = new MediaRecorder(combined, { mimeType: 'video/webm;codecs=vp9,opus' });
+
+  // Pick best supported mime type
+  const mimeCandidates = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+  ];
+  const mime = mimeCandidates.find((m) => MediaRecorder.isTypeSupported(m)) ?? 'video/webm';
+
+  const recorder = new MediaRecorder(combined, { mimeType: mime });
   const chunks: Blob[] = [];
   recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
   const totalDuration = frames.reduce((a, f) => a + f.durationMs, 0);
 
-  const webmBlob = await new Promise<Blob>((resolve, reject) => {
+  const blob = await new Promise<Blob>((resolve, reject) => {
     recorder.onstop = () => {
-      resolve(new Blob(chunks, { type: 'video/webm' }));
+      resolve(new Blob(chunks, { type: mime }));
       audioCtx?.close();
     };
-    recorder.onerror = () => reject(new Error('Error al grabar video'));
+    recorder.onerror = () => reject(new Error('Error al grabar'));
 
     recorder.start(100);
+    onProgress?.('Grabando...', 5);
 
-    requestAnimationFrame(function renderLoop() {
-      let elapsed = 0;
-      let lastTime: number | null = null;
+    let elapsed = 0;
+    let lastTime: number | null = null;
 
-      function tick(now: number) {
-        if (lastTime === null) lastTime = now;
-        elapsed += now - lastTime;
-        lastTime = now;
+    function tick(now: number) {
+      if (lastTime === null) lastTime = now;
+      elapsed += now - lastTime;
+      lastTime = now;
 
-        let acc = 0;
-        let frameIdx = 0;
-        for (let i = 0; i < frames.length; i++) {
-          acc += frames[i].durationMs;
-          if (elapsed < acc) { frameIdx = i; break; }
-        }
-
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(0, 0, w, h);
-        renderFrame(ctx, frames[frameIdx], w, h);
-
-        onProgress?.('Grabando frames...', Math.min(90, (elapsed / totalDuration) * 90));
-
-        if (elapsed < totalDuration) {
-          requestAnimationFrame(tick);
-        } else {
-          recorder.stop();
-        }
+      // Find current frame
+      let acc = 0;
+      let frameIdx = 0;
+      for (let i = 0; i < frames.length; i++) {
+        acc += frames[i].durationMs;
+        if (elapsed < acc) { frameIdx = i; break; }
       }
-      requestAnimationFrame(tick);
-    });
+
+      // Render frame
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, w, h);
+      renderFrame(ctx, frames[frameIdx], w, h);
+
+      const pct = Math.min(95, (elapsed / totalDuration) * 95);
+      onProgress?.('Grabando...', pct);
+
+      if (elapsed < totalDuration) {
+        requestAnimationFrame(tick);
+      } else {
+        onProgress?.('Finalizando...', 98);
+        recorder.stop();
+      }
+    }
+
+    requestAnimationFrame(tick);
   });
-
-  onProgress?.('Convirtiendo a MP4...', 92);
-
-  // Step 2: Convert WebM to MP4 using FFmpeg.wasm
-  const ffmpeg = await loadFFmpeg((p) => {
-    onProgress?.('Convirtiendo a MP4...', 92 + p * 0.08);
-  });
-
-  const webmData = new Uint8Array(await webmBlob.arrayBuffer());
-  await ffmpeg.writeFile('input.webm', webmData);
-
-  await ffmpeg.exec([
-    '-i', 'input.webm',
-    '-c:v', 'libx264',
-    '-preset', 'fast',
-    '-crf', '23',
-    '-c:a', 'aac',
-    '-b:a', '128k',
-    '-pix_fmt', 'yuv420p',
-    '-movflags', '+faststart',
-    'output.mp4',
-  ]);
-
-  const mp4Data = await ffmpeg.readFile('output.mp4');
-  await ffmpeg.deleteFile('input.webm');
-  await ffmpeg.deleteFile('output.mp4');
 
   onProgress?.('Listo!', 100);
-
-  return new Blob([mp4Data], { type: 'video/mp4' });
+  return blob;
 }
 
 export function downloadBlob(blob: Blob, filename: string) {
@@ -160,5 +119,5 @@ export function downloadBlob(blob: Blob, filename: string) {
   a.href = url;
   a.download = filename;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }

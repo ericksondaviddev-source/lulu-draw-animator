@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { X, Download, Film, Loader2 } from 'lucide-react';
 import { useStudioStore } from '../../store/useStudioStore';
 
-type ExportStatus = 'idle' | 'recording' | 'converting' | 'done' | 'error';
+type ExportStatus = 'idle' | 'recording' | 'done' | 'error';
 
 export default function ExportDialog({
   open,
@@ -28,16 +28,15 @@ export default function ExportDialog({
     setVideoBlob(null);
 
     try {
-      const { exportToMp4 } = await import('../../engine/mp4Exporter');
+      const { exportVideo } = await import('../../engine/mp4Exporter');
 
-      const blob = await exportToMp4(
+      const blob = await exportVideo(
         frames,
         clips,
         canvasSize,
         (s, p) => {
           setStage(s);
           setProgress(p);
-          if (s.includes('Convirtiendo')) setStatus('converting');
         },
       );
 
@@ -54,9 +53,9 @@ export default function ExportDialog({
     const url = URL.createObjectURL(videoBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `lulu-${Date.now()}.mp4`;
+    a.download = `lulu-${Date.now()}.webm`;
     a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
   }, [videoBlob]);
 
   if (!open) return null;
@@ -88,12 +87,12 @@ export default function ExportDialog({
             {(frames.reduce((a, f) => a + f.durationMs, 0) / 1000).toFixed(1)}s
           </p>
           <p>
-            <span className="text-zinc-300">Formato:</span> MP4 (compatible con todo)
+            <span className="text-zinc-300">Formato:</span> WebM (se reproduce en todos lados)
           </p>
         </div>
 
         {/* Progress */}
-        {(status === 'recording' || status === 'converting') && (
+        {status === 'recording' && (
           <div className="mb-4">
             <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
               <div
@@ -122,14 +121,14 @@ export default function ExportDialog({
               className="flex-1 h-11 rounded-xl bg-violet-600 text-white font-semibold text-sm hover:bg-violet-500 transition-all flex items-center justify-center gap-2 active:scale-95"
             >
               <Download size={15} />
-              Exportar MP4
+              Exportar Video
             </button>
           )}
 
-          {(status === 'recording' || status === 'converting') && (
+          {status === 'recording' && (
             <div className="flex-1 h-11 rounded-xl bg-zinc-800 text-zinc-400 font-medium text-sm flex items-center justify-center gap-2">
               <Loader2 size={14} className="animate-spin" />
-              {status === 'recording' ? 'Grabando...' : 'Convirtiendo a MP4...'}
+              Grabando... {Math.round(progress)}%
             </div>
           )}
 
@@ -139,7 +138,7 @@ export default function ExportDialog({
               className="flex-1 h-11 rounded-xl bg-green-600 text-white font-semibold text-sm hover:bg-green-500 transition-all flex items-center justify-center gap-2 active:scale-95"
             >
               <Download size={15} />
-              Descargar MP4
+              Descargar Video
             </button>
           )}
 
