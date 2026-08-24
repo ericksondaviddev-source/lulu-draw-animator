@@ -4,7 +4,6 @@ import { useStudioStore } from '../../store/useStudioStore';
 import { useDrawingEngine } from './useDrawingEngine';
 import { STICKMAN_TEMPLATES } from '../../data/stickmanTemplates';
 import { PIXEL_TEMPLATES } from '../../data/pixelTemplates';
-import { ASPECT_RATIOS } from '../../types/studio';
 import type { StickmanJoint } from '../../types/studio';
 
 type DragTarget =
@@ -13,16 +12,17 @@ type DragTarget =
   | { type: 'text'; id: string; offsetX: number; offsetY: number }
   | { type: 'shape'; id: string; offsetX: number; offsetY: number }
   | { type: 'joint'; stickmanId: string; joint: StickmanJoint; charType: 'stickman' | 'pixelChar' }
-  | { type: 'pan'; startX: number; startY: number; origPanX: number; origPanY: number }
   | null;
+
+const LOGICAL_W = 1280;
+const LOGICAL_H = 720;
 
 export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) {
   const mainRef = useRef<HTMLCanvasElement>(null);
   const onionRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragTarget>(null);
-  const selectedId = useStudioStore((s) => s.selectedId);
-  const setSelectedId = useStudioStore((s) => s.setSelectedId);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const frames = useStudioStore((s) => s.project.frames);
   const activeFrameId = useStudioStore((s) => s.activeFrameId);
@@ -44,16 +44,6 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
   const textBold = useStudioStore((s) => s.textBold);
   const textItalic = useStudioStore((s) => s.textItalic);
   const color = useStudioStore((s) => s.color);
-  const aspectRatio = useStudioStore((s) => s.aspectRatio);
-  const canvasZoom = useStudioStore((s) => s.canvasZoom);
-  const canvasPanX = useStudioStore((s) => s.canvasPanX);
-  const canvasPanY = useStudioStore((s) => s.canvasPanY);
-  const setCanvasZoom = useStudioStore((s) => s.setCanvasZoom);
-  const setCanvasPan = useStudioStore((s) => s.setCanvasPan);
-
-  const ar = ASPECT_RATIOS.find((a) => a.id === aspectRatio) ?? ASPECT_RATIOS[0];
-  const LOGICAL_W = ar.width;
-  const LOGICAL_H = ar.height;
 
   const {
     liveStroke,
@@ -73,25 +63,16 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
   const activeIdx = frames.findIndex((f) => f.id === activeFrameId);
   const prevFrame = activeIdx > 0 ? frames[activeIdx - 1] : null;
 
+  // Simple pointer mapping - no zoom, just fit to container
   const mapPointer = useCallback(
     (e: React.PointerEvent): { x: number; y: number } => {
       const rect = containerRef.current!.getBoundingClientRect();
-      const containerW = rect.width;
-      const containerH = rect.height;
-      const scaleX = containerW / LOGICAL_W;
-      const scaleY = containerH / LOGICAL_H;
-      const baseScale = Math.min(scaleX, scaleY);
-      const effectiveScale = baseScale * canvasZoom;
-      const renderW = LOGICAL_W * effectiveScale;
-      const renderH = LOGICAL_H * effectiveScale;
-      const offsetX = (containerW - renderW) / 2 + canvasPanX;
-      const offsetY = (containerH - renderH) / 2 + canvasPanY;
       return {
-        x: (e.clientX - rect.left - offsetX) / effectiveScale,
-        y: (e.clientY - rect.top - offsetY) / effectiveScale,
+        x: ((e.clientX - rect.left) / rect.width) * LOGICAL_W,
+        y: ((e.clientY - rect.top) / rect.height) * LOGICAL_H,
       };
     },
-    [LOGICAL_W, LOGICAL_H, canvasZoom, canvasPanX, canvasPanY],
+    [],
   );
 
   // Hit test stickmen
@@ -154,12 +135,11 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
     [viewFrame],
   );
 
-  // Hit test joint dots (when stickman or pixelChar is selected)
+  // Hit test joint dots
   const hitTestJoint = useCallback(
     (p: { x: number; y: number }) => {
       if (!viewFrame || !selectedId) return null;
 
-      // Check stickman joints
       const stick = viewFrame.stickmen?.find((s) => s.id === selectedId);
       if (stick) {
         const tpl = STICKMAN_TEMPLATES.find((t) => t.id === stick.templateId);
@@ -172,11 +152,10 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
                 if (v) joints[k as keyof typeof joints] = v;
               }
             }
-            const JOINT_RADIUS = 8 / canvasZoom;
             for (const [key, jp] of Object.entries(joints)) {
               const jx = jp.x * stick.scale + stick.x;
               const jy = jp.y * stick.scale + stick.y;
-              if (Math.hypot(p.x - jx, p.y - jy) <= JOINT_RADIUS) {
+              if (Math.hypot(p.x - jx, p.y - jy) <= 12) {
                 return { stickmanId: stick.id, joint: key as StickmanJoint, charType: 'stickman' as const };
               }
             }
@@ -184,7 +163,6 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
         }
       }
 
-      // Check pixelChar joints
       const pc = viewFrame.pixelChars?.find((c) => c.id === selectedId);
       if (pc) {
         const tpl = PIXEL_TEMPLATES.find((t) => t.id === pc.templateId);
@@ -197,11 +175,10 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
                 if (v) joints[k as keyof typeof joints] = v;
               }
             }
-            const JOINT_RADIUS = 8 / canvasZoom;
             for (const [key, jp] of Object.entries(joints)) {
               const jx = jp.x * pc.scale + pc.x;
               const jy = jp.y * pc.scale + pc.y;
-              if (Math.hypot(p.x - jx, p.y - jy) <= JOINT_RADIUS) {
+              if (Math.hypot(p.x - jx, p.y - jy) <= 12) {
                 return { stickmanId: pc.id, joint: key as StickmanJoint, charType: 'pixelChar' as const };
               }
             }
@@ -211,7 +188,7 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
 
       return null;
     },
-    [viewFrame, selectedId, canvasZoom],
+    [viewFrame, selectedId],
   );
 
   // Hit test texts
@@ -244,42 +221,20 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
     [viewFrame],
   );
 
-  // Scroll wheel zoom
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const handler = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        const delta = e.deltaY > 0 ? -0.15 : 0.15;
-        setCanvasZoom(canvasZoom + delta);
-      }
-    };
-    el.addEventListener('wheel', handler, { passive: false });
-    return () => el.removeEventListener('wheel', handler);
-  }, [canvasZoom, setCanvasZoom]);
-
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
       (e.target as HTMLElement).setPointerCapture(e.pointerId);
       const p = mapPointer(e);
 
-      // Middle mouse = pan
-      if (e.button === 1) {
-        e.preventDefault();
-        setDrag({ type: 'pan', startX: e.clientX, startY: e.clientY, origPanX: canvasPanX, origPanY: canvasPanY });
-        return;
-      }
-
       if (selectedTool === 'eraser') {
-        eraseAt(p, 10);
+        eraseAt(p, 15);
         return;
       }
 
       if (selectedTool === 'text') {
         const item = {
           id: crypto.randomUUID(),
-          text: 'Texto',
+          text: 'Hola',
           x: p.x,
           y: p.y,
           fontSize: textFontSize,
@@ -332,19 +287,12 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
         startStroke(p);
       }
     },
-    [mapPointer, selectedTool, eraseAt, startStroke, hitTestStickman, hitTestPixelChar, hitTestText, hitTestShape, hitTestJoint, textFontSize, textFontFamily, textBold, textItalic, color, addTextItem, canvasPanX, canvasPanY],
+    [mapPointer, selectedTool, eraseAt, startStroke, hitTestStickman, hitTestPixelChar, hitTestText, hitTestShape, hitTestJoint, textFontSize, textFontFamily, textBold, textItalic, color, addTextItem],
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
       const p = mapPointer(e);
-
-      if (drag?.type === 'pan') {
-        const dx = e.clientX - drag.startX;
-        const dy = e.clientY - drag.startY;
-        setCanvasPan(drag.origPanX + dx, drag.origPanY + dy);
-        return;
-      }
 
       if (drag?.type === 'joint') {
         if (drag.charType === 'stickman') {
@@ -387,7 +335,7 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
         continueStroke(p);
       }
     },
-    [mapPointer, drag, selectedTool, continueStroke, updateStickman, updatePixelChar, updateTextItem, updateShapeItem, setStickmanJoint, setPixelCharJoint, setCanvasPan, viewFrame],
+    [mapPointer, drag, selectedTool, continueStroke, updateStickman, updatePixelChar, updateTextItem, updateShapeItem, setStickmanJoint, setPixelCharJoint, viewFrame],
   );
 
   const handlePointerUp = useCallback(() => {
@@ -397,7 +345,7 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
     setDrag(null);
   }, [drag, commitStroke]);
 
-  // Keyboard delete for selected elements
+  // Keyboard delete
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
@@ -422,7 +370,7 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
       renderFrame(ctx, prevFrame, LOGICAL_W, LOGICAL_H);
       ctx.globalAlpha = 1;
     }
-  }, [prevFrame, LOGICAL_W, LOGICAL_H]);
+  }, [prevFrame]);
 
   // Render main canvas
   useEffect(() => {
@@ -434,7 +382,7 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
       renderStroke(ctx, liveStroke);
     }
 
-    // Draw selection indicator + joint editing dots
+    // Draw selection indicator + joint dots
     if (selectedId && viewFrame) {
       ctx.save();
       ctx.strokeStyle = '#8b5cf6';
@@ -461,15 +409,15 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
               Math.max(...ys) - Math.min(...ys) + 30,
             );
             ctx.setLineDash([]);
-            for (const [key, jp] of Object.entries(joints)) {
+            for (const [, jp] of Object.entries(joints)) {
               const jx = jp.x * stick.scale + stick.x;
               const jy = jp.y * stick.scale + stick.y;
               ctx.beginPath();
-              ctx.arc(jx, jy, 5, 0, Math.PI * 2);
+              ctx.arc(jx, jy, 6, 0, Math.PI * 2);
               ctx.fillStyle = 'rgba(139, 92, 246, 0.7)';
               ctx.fill();
               ctx.strokeStyle = '#fff';
-              ctx.lineWidth = 1.5;
+              ctx.lineWidth = 2;
               ctx.stroke();
             }
           }
@@ -496,15 +444,15 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
               Math.max(...ys) - Math.min(...ys) + 30,
             );
             ctx.setLineDash([]);
-            for (const [key, jp] of Object.entries(joints)) {
+            for (const [, jp] of Object.entries(joints)) {
               const jx = jp.x * pc.scale + pc.x;
               const jy = jp.y * pc.scale + pc.y;
               ctx.beginPath();
-              ctx.arc(jx, jy, 5, 0, Math.PI * 2);
+              ctx.arc(jx, jy, 6, 0, Math.PI * 2);
               ctx.fillStyle = 'rgba(59, 130, 246, 0.7)';
               ctx.fill();
               ctx.strokeStyle = '#fff';
-              ctx.lineWidth = 1.5;
+              ctx.lineWidth = 2;
               ctx.stroke();
             }
           }
@@ -525,26 +473,18 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
 
       ctx.restore();
     }
-  }, [viewFrame, liveStroke, selectedId, LOGICAL_W, LOGICAL_H]);
+  }, [viewFrame, liveStroke, selectedId]);
 
   const bgColor = viewFrame?.bgColor ?? '#ffffff';
 
   return (
-    <div ref={containerRef} className="relative flex-1 flex items-center justify-center p-4 overflow-hidden">
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-[720px] h-[405px] rounded-full blur-[120px] opacity-20" style={{ backgroundColor: bgColor }} />
-      </div>
+    <div ref={containerRef} className="relative flex-1 flex items-center justify-center overflow-hidden">
       <div
-        className="relative rounded-2xl shadow-2xl overflow-hidden border border-zinc-800"
+        className="relative w-full h-full"
         style={{
-          width: `${LOGICAL_W}px`,
-          height: `${LOGICAL_H}px`,
-          maxWidth: '100%',
-          maxHeight: '100%',
-          transform: `scale(${canvasZoom}) translate(${canvasPanX / canvasZoom}px, ${canvasPanY / canvasZoom}px)`,
-          transformOrigin: 'center center',
           backgroundColor: bgColor,
-          cursor: drag?.type === 'pan' ? 'grabbing' : selectedTool === 'eraser' ? 'cell' : selectedTool === 'text' ? 'text' : 'crosshair',
+          cursor: selectedTool === 'eraser' ? 'cell' : selectedTool === 'text' ? 'text' : 'crosshair',
+          touchAction: 'none',
         }}
       >
         <canvas ref={onionRef} width={LOGICAL_W} height={LOGICAL_H} className="absolute inset-0 w-full h-full pointer-events-none" />
@@ -558,13 +498,6 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
           onPointerUp={handlePointerUp}
         />
       </div>
-
-      {/* Zoom indicator */}
-      {canvasZoom !== 1 && (
-        <div className="absolute bottom-4 right-4 bg-zinc-900/80 backdrop-blur-md rounded-lg px-3 py-1.5 border border-zinc-700 text-[11px] font-mono text-zinc-300">
-          {Math.round(canvasZoom * 100)}%
-        </div>
-      )}
     </div>
   );
 }

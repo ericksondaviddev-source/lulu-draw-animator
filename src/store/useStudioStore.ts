@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Frame, Stroke, AudioClip, Point, StickmanInstance, TextItem, ShapeItem, ShapeKind, SavedAnimation, AspectRatio, StickmanJoint, PixelCharInstance, PixelPartId } from '../types/studio';
+import type { Frame, Stroke, AudioClip, Point, StickmanInstance, TextItem, ShapeItem, ShapeKind, SavedAnimation, StickmanJoint, PixelCharInstance, PixelPartId } from '../types/studio';
 import type { RenderMode } from '../data/bgPresets';
 import { BG_PRESETS } from '../data/bgPresets';
 import { findStrokeAtPoint } from '../engine/geometry';
@@ -48,10 +48,6 @@ interface StudioState {
   textFontSize: number;
   textBold: boolean;
   textItalic: boolean;
-  aspectRatio: AspectRatio;
-  canvasZoom: number;
-  canvasPanX: number;
-  canvasPanY: number;
   selectedId: string | null;
   savedAnimations: SavedAnimation[];
   past: Snapshot[];
@@ -84,9 +80,6 @@ interface StudioState {
   setTextFontSize: (s: number) => void;
   setTextBold: (b: boolean) => void;
   setTextItalic: (i: boolean) => void;
-  setAspectRatio: (r: AspectRatio) => void;
-  setCanvasZoom: (z: number) => void;
-  setCanvasPan: (x: number, y: number) => void;
   setSelectedId: (id: string | null) => void;
   addStickman: (templateId: string, poseIndex?: number) => void;
   updateStickman: (id: string, updates: Partial<StickmanInstance>) => void;
@@ -153,10 +146,6 @@ export const useStudioStore = create<StudioState>((set, get) => {
     textFontSize: 32,
     textBold: false,
     textItalic: false,
-    aspectRatio: '16:9',
-    canvasZoom: 1,
-    canvasPanX: 0,
-    canvasPanY: 0,
     selectedId: null,
     savedAnimations: [],
     past: [],
@@ -358,9 +347,6 @@ export const useStudioStore = create<StudioState>((set, get) => {
     setTextFontSize: (s) => set({ textFontSize: s }),
     setTextBold: (b) => set({ textBold: b }),
     setTextItalic: (i) => set({ textItalic: i }),
-    setAspectRatio: (r) => set({ aspectRatio: r }),
-    setCanvasZoom: (z) => set({ canvasZoom: Math.max(0.25, Math.min(5, z)) }),
-    setCanvasPan: (x, y) => set({ canvasPanX: x, canvasPanY: y }),
     setSelectedId: (id) => set({ selectedId: id }),
 
     setBgColor: (c) =>
