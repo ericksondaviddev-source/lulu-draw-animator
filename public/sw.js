@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lulu-animator-v1';
+const CACHE_NAME = 'lulu-animator-v3';
 const PRECACHE = ['/', '/index.html'];
 
 self.addEventListener('install', (e) => {
