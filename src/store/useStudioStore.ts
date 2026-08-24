@@ -104,6 +104,7 @@ interface StudioState {
   saveAnimation: (name: string, emoji: string) => void;
   loadAnimation: (id: string) => void;
   removeSavedAnimation: (id: string) => void;
+  appendFrames: (id: string) => void;
 }
 
 function cloneFrames(frames: Frame[]): Frame[] {
@@ -122,6 +123,23 @@ function cloneProject(state: StudioState): Snapshot {
     frames: cloneFrames(state.project.frames),
     clips: state.project.clips.map((c) => ({ ...c })),
   };
+}
+
+const STORAGE_KEY = 'lulu-animations';
+
+function loadSavedAnimations(): SavedAnimation[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedAnimations(anim: SavedAnimation[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(anim));
+  } catch { /* quota exceeded */ }
 }
 
 export const useStudioStore = create<StudioState>((set, get) => {
@@ -147,7 +165,7 @@ export const useStudioStore = create<StudioState>((set, get) => {
     textBold: false,
     textItalic: false,
     selectedId: null,
-    savedAnimations: [],
+    savedAnimations: loadSavedAnimations(),
     past: [],
     future: [],
 
@@ -711,7 +729,9 @@ export const useStudioStore = create<StudioState>((set, get) => {
           frames: cloneFrames(s.project.frames),
           createdAt: Date.now(),
         };
-        return { savedAnimations: [...s.savedAnimations, saved] };
+        const updated = [...s.savedAnimations, saved];
+        persistSavedAnimations(updated);
+        return { savedAnimations: updated };
       }),
 
     loadAnimation: (id) =>
@@ -732,8 +752,28 @@ export const useStudioStore = create<StudioState>((set, get) => {
       }),
 
     removeSavedAnimation: (id) =>
-      set((s) => ({
-        savedAnimations: s.savedAnimations.filter((a) => a.id !== id),
-      })),
+      set((s) => {
+        const updated = s.savedAnimations.filter((a) => a.id !== id);
+        persistSavedAnimations(updated);
+        return { savedAnimations: updated };
+      }),
+
+    appendFrames: (id) =>
+      set((s) => {
+        const anim = s.savedAnimations.find((a) => a.id === id);
+        if (!anim) return {};
+        const snapshot = cloneProject(s);
+        const newFrames = cloneFrames(anim.frames);
+        const newFrameId = newFrames[0]?.id ?? genId();
+        return {
+          project: {
+            ...s.project,
+            frames: [...s.project.frames, ...newFrames],
+          },
+          activeFrameId: newFrameId,
+          past: [...s.past, snapshot].slice(-50),
+          future: [],
+        };
+      }),
   };
 });

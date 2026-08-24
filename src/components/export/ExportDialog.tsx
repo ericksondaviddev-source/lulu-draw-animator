@@ -1,9 +1,8 @@
 import { useState, useCallback } from 'react';
 import { X, Download, Film, Loader2 } from 'lucide-react';
 import { useStudioStore } from '../../store/useStudioStore';
-import { clsx } from 'clsx';
 
-type ExportStatus = 'idle' | 'recording' | 'done' | 'error';
+type ExportStatus = 'idle' | 'recording' | 'converting' | 'done' | 'error';
 
 export default function ExportDialog({
   open,
@@ -14,7 +13,8 @@ export default function ExportDialog({
 }) {
   const [status, setStatus] = useState<ExportStatus>('idle');
   const [progress, setProgress] = useState(0);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [stage, setStage] = useState('');
+  const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
   const frames = useStudioStore((s) => s.project.frames);
@@ -24,139 +24,46 @@ export default function ExportDialog({
   const handleExport = useCallback(async () => {
     setStatus('recording');
     setProgress(0);
-    setVideoUrl(null);
+    setStage('Preparando...');
+    setVideoBlob(null);
 
     try {
-      const { pickMimeType, EXPORT_MIME_CANDIDATES } = await import(
-        '../../engine/exporter'
+      const { exportToMp4 } = await import('../../engine/mp4Exporter');
+
+      const blob = await exportToMp4(
+        frames,
+        clips,
+        canvasSize,
+        (s, p) => {
+          setStage(s);
+          setProgress(p);
+          if (s.includes('Convirtiendo')) setStatus('converting');
+        },
       );
-      const { renderFrame } = await import('../../engine/render');
 
-      const mime = pickMimeType();
-      const w = canvasSize.width;
-      const h = canvasSize.height;
-
-      const exportCanvas = document.createElement('canvas');
-      exportCanvas.width = w;
-      exportCanvas.height = h;
-      const ctx = exportCanvas.getContext('2d')!;
-
-      const stream = exportCanvas.captureStream(30);
-
-      // Audio context for mixed output
-      let audioCtx: AudioContext | null = null;
-      let audioDest: MediaStreamAudioDestinationNode | null = null;
-      const audioTracks: MediaStreamTrack[] = [];
-
-      if (clips.length > 0) {
-        audioCtx = new AudioContext();
-        audioDest = audioCtx.createMediaStreamDestination();
-
-        // Schedule voice clips
-        for (const clip of clips.filter((c) => c.kind === 'voice' && c.blobUrl)) {
-          try {
-            const resp = await fetch(clip.blobUrl!);
-            const buf = await resp.arrayBuffer();
-            const audioBuf = await audioCtx.decodeAudioData(buf);
-            const src = audioCtx.createBufferSource();
-            src.buffer = audioBuf;
-            src.connect(audioDest);
-            src.start(audioCtx.currentTime + clip.startMs / 1000);
-          } catch {
-            // skip broken clip
-          }
-        }
-
-        // Schedule SFX
-        const { playSfxRecipe } = await import('../../engine/audioSynth');
-        for (const clip of clips.filter((c) => c.kind === 'sfx' && c.sfxId)) {
-          playSfxRecipe(audioCtx, audioDest, clip.sfxId!, audioCtx.currentTime + clip.startMs / 1000);
-        }
-
-        audioTracks.push(...audioDest.stream.getAudioTracks());
-      }
-
-      const combined = new MediaStream([
-        ...stream.getVideoTracks(),
-        ...audioTracks,
-      ]);
-
-      const recorder = new MediaRecorder(combined, { mimeType: mime });
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-
-      const totalDuration = frames.reduce((a, f) => a + f.durationMs, 0);
-
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: mime });
-        const url = URL.createObjectURL(blob);
-        setVideoUrl(url);
-        setStatus('done');
-        audioCtx?.close();
-      };
-
-      recorder.start(100);
-
-      // Render loop using real-time playback
-      await new Promise<void>((resolve) => {
-        let frameIdx = 0;
-        let elapsed = 0;
-        let lastTime: number | null = null;
-
-        const renderNext = (now: number) => {
-          if (lastTime === null) lastTime = now;
-          const dt = now - lastTime;
-          lastTime = now;
-          elapsed += dt;
-
-          // Find current frame
-          let acc = 0;
-          for (let i = 0; i < frames.length; i++) {
-            acc += frames[i].durationMs;
-            if (elapsed < acc) {
-              frameIdx = i;
-              break;
-            }
-          }
-
-          // Render frame
-          ctx.fillStyle = '#fff';
-          ctx.fillRect(0, 0, w, h);
-          renderFrame(ctx, frames[frameIdx], w, h);
-
-          setProgress(Math.min(100, (elapsed / totalDuration) * 100));
-
-          if (elapsed < totalDuration) {
-            requestAnimationFrame(renderNext);
-          } else {
-            recorder.stop();
-            resolve();
-          }
-        };
-
-        requestAnimationFrame(renderNext);
-      });
+      setVideoBlob(blob);
+      setStatus('done');
     } catch (err) {
       setStatus('error');
-      setErrorMsg(err instanceof Error ? err.message : 'Error desconocido');
+      setErrorMsg(err instanceof Error ? err.message : 'Error al exportar');
     }
   }, [frames, clips, canvasSize]);
 
   const handleDownload = useCallback(() => {
-    if (!videoUrl) return;
+    if (!videoBlob) return;
+    const url = URL.createObjectURL(videoBlob);
     const a = document.createElement('a');
-    a.href = videoUrl;
-    a.download = `lulu-animation-${Date.now()}.webm`;
+    a.href = url;
+    a.download = `lulu-${Date.now()}.mp4`;
     a.click();
-  }, [videoUrl]);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, [videoBlob]);
 
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-[420px] shadow-2xl">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-[380px] shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -181,16 +88,12 @@ export default function ExportDialog({
             {(frames.reduce((a, f) => a + f.durationMs, 0) / 1000).toFixed(1)}s
           </p>
           <p>
-            <span className="text-zinc-300">Clips de audio:</span> {clips.length}
-          </p>
-          <p className="text-[10px] text-zinc-500 pt-1">
-            Se exportará como WebM (compatible con todos los navegadores). Puedes
-            convertir a MP4 con herramientas como HandBrake o FFmpeg.
+            <span className="text-zinc-300">Formato:</span> MP4 (compatible con todo)
           </p>
         </div>
 
         {/* Progress */}
-        {status === 'recording' && (
+        {(status === 'recording' || status === 'converting') && (
           <div className="mb-4">
             <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
               <div
@@ -199,7 +102,7 @@ export default function ExportDialog({
               />
             </div>
             <p className="text-[10px] text-zinc-500 mt-1 text-center">
-              Grabando... {Math.round(progress)}%
+              {stage} {Math.round(progress)}%
             </p>
           </div>
         )}
@@ -216,34 +119,34 @@ export default function ExportDialog({
           {status === 'idle' && (
             <button
               onClick={handleExport}
-              className="flex-1 h-10 rounded-xl bg-violet-600 text-white font-medium text-sm hover:bg-violet-500 transition-all flex items-center justify-center gap-2"
+              className="flex-1 h-11 rounded-xl bg-violet-600 text-white font-semibold text-sm hover:bg-violet-500 transition-all flex items-center justify-center gap-2 active:scale-95"
             >
-              <Download size={14} />
-              Exportar
+              <Download size={15} />
+              Exportar MP4
             </button>
           )}
 
-          {status === 'recording' && (
-            <div className="flex-1 h-10 rounded-xl bg-zinc-800 text-zinc-400 font-medium text-sm flex items-center justify-center gap-2">
+          {(status === 'recording' || status === 'converting') && (
+            <div className="flex-1 h-11 rounded-xl bg-zinc-800 text-zinc-400 font-medium text-sm flex items-center justify-center gap-2">
               <Loader2 size={14} className="animate-spin" />
-              Exportando...
+              {status === 'recording' ? 'Grabando...' : 'Convirtiendo a MP4...'}
             </div>
           )}
 
           {status === 'done' && (
             <button
               onClick={handleDownload}
-              className="flex-1 h-10 rounded-xl bg-green-600 text-white font-medium text-sm hover:bg-green-500 transition-all flex items-center justify-center gap-2"
+              className="flex-1 h-11 rounded-xl bg-green-600 text-white font-semibold text-sm hover:bg-green-500 transition-all flex items-center justify-center gap-2 active:scale-95"
             >
-              <Download size={14} />
-              Descargar Video
+              <Download size={15} />
+              Descargar MP4
             </button>
           )}
 
           {status === 'error' && (
             <button
               onClick={handleExport}
-              className="flex-1 h-10 rounded-xl bg-violet-600 text-white font-medium text-sm hover:bg-violet-500 transition-all"
+              className="flex-1 h-11 rounded-xl bg-violet-600 text-white font-semibold text-sm hover:bg-violet-500 transition-all active:scale-95"
             >
               Reintentar
             </button>
