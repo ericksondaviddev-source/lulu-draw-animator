@@ -478,13 +478,12 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
   const bgColor = viewFrame?.bgColor ?? '#ffffff';
 
   return (
-    <div ref={containerRef} className="relative flex-1 flex items-center justify-center overflow-hidden">
+    <div ref={containerRef} className="relative flex-1 overflow-hidden" style={{ touchAction: 'none' }}>
       <div
-        className="relative w-full h-full"
+        className="absolute inset-0"
         style={{
           backgroundColor: bgColor,
           cursor: selectedTool === 'eraser' ? 'cell' : selectedTool === 'text' ? 'text' : 'crosshair',
-          touchAction: 'none',
         }}
       >
         <canvas ref={onionRef} width={LOGICAL_W} height={LOGICAL_H} className="absolute inset-0 w-full h-full pointer-events-none" />
