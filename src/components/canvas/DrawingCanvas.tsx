@@ -360,15 +360,25 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
     return () => window.removeEventListener('keydown', handler);
   }, [selectedId, removeStickman, removePixelChar, removeTextItem, removeShapeItem]);
 
-  // Render onion skin
+  // Render onion skin (previous frame ghost)
   useEffect(() => {
     const ctx = onionRef.current?.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
     if (prevFrame) {
-      ctx.globalAlpha = 0.25;
+      // Draw previous frame with blue tint at 30% opacity
+      ctx.save();
+      ctx.globalAlpha = 0.3;
+      ctx.filter = 'saturate(0.4) brightness(0.85)';
       renderFrame(ctx, prevFrame, LOGICAL_W, LOGICAL_H);
-      ctx.globalAlpha = 1;
+      ctx.restore();
+
+      // Add a subtle blue overlay to distinguish from current frame
+      ctx.save();
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = '#6366f1';
+      ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
+      ctx.restore();
     }
   }, [prevFrame]);
 
