@@ -488,7 +488,7 @@ export default function DrawingCanvas({ viewFrameId }: { viewFrameId: string }) 
   const bgColor = viewFrame?.bgColor ?? '#ffffff';
 
   return (
-    <div ref={containerRef} className="relative flex-1 overflow-hidden" style={{ touchAction: 'none' }}>
+    <div ref={containerRef} className="relative w-full h-full overflow-hidden" style={{ touchAction: 'none' }}>
       <div
         className="absolute inset-0"
         style={{

@@ -157,8 +157,8 @@ function MobileLayout({
         </button>
       </header>
 
-      {/* Canvas — always fills remaining space */}
-      <div className="flex-1 min-h-0 relative">
+      {/* Canvas — fills remaining space */}
+      <div className="flex-1 min-h-0" style={{ height: 0 }}>
         <DrawingCanvas viewFrameId={viewFrameId} />
       </div>
 
